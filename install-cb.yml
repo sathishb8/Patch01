@@ -1,0 +1,80 @@
+---
+# Created and tested on CentOs machines only. Please define the variables in case other OS.
+
+- hosts: all
+  become: yes
+
+  tasks:
+    - name: Include the variables from the proper distribution file
+      include_vars:
+        file: 'var/{{ansible_distribution}}.yaml'
+
+    - name: make the target Carbon Black dir
+      file:
+        path: "/root/{{ ansible_distribution }}/carbonblack/"
+        state: directory
+        mode: '0755'
+
+    - name: Check Carbon Black service status
+      service_facts:
+      register: services_list
+      ignore_errors: yes
+
+    - name: Carbon Black service state?
+      debug:
+       var: services_list.ansible_facts.services["cbagentd.service"]
+
+    - when: services_list.ansible_facts.services["cbagentd.service"] is not defined
+      block:
+        - name: make the target Carbon Black dir mandated by the installer
+          file:
+            path: "/cb-install"
+            state: directory
+            mode: '0755'
+
+        - name: copy the Carbon Black installation files
+          copy:
+            src: "files/{{ ansible_distribution }}/carbonblack/{{ item }}"
+            dest: "/cb-install/{{ item }}"
+            backup: yes
+            force: yes
+            mode: '540'
+            owner: 'root'
+          with_items:
+            - "{{ carbon_black_installer }}"
+
+        - name: Extract Carbon Black accessory files
+          ansible.builtin.unarchive:
+            src: "files/{{ ansible_distribution }}/carbonblack/{{ item }}"
+            dest: "/cb-install/"
+          with_items:
+            - "{{ carbon_black_tar }}"
+
+        - name: Copy the Carbon Black accessory files
+          copy:
+            src: "files/{{ ansible_distribution }}/carbonblack/{{ item }}" 
+            dest: "/cb-install/{{ item }}"
+            owner: 'root'
+            mode: '440'
+            backup: yes
+          with_items:
+            - "{{ carbon_black_codes }}"
+            - "{{ carbon_black_tar }}"
+            - Readme.txt
+
+        - name: Install Carbon Black
+          shell: "./{{ carbon_black_installer }}"
+          args:
+            chdir: /cb-install/
+            executable: /bin/bash
+
+    - name: Cleanup
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - "/cb-install/{{ carbon_black_codes }}"
+        - "/cb-install/{{ carbon_black_tar }}"
+        - "/cb-install/{{ carbon_black_installer }}"
+        - "/cb-install/"
+
